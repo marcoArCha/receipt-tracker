@@ -1,0 +1,19 @@
+# Backend (Python)
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.pyc
+backend/.pytest_cache/
+backend/.aws-sam/
+backend/samconfig.toml
+
+# Frontend (Node/React)
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+
+# OS/editor noise
+.DS_Store
+.vscode/
+.idea/
