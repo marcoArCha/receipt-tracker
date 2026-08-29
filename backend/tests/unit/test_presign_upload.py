@@ -1,10 +1,10 @@
 import json
 
 
-def _make_event(user_id: str | None):
+def _make_event(user_id: str | None, body: dict | None = None):
     """Build a fake API Gateway event, mimicking what API Gateway sends
     once the Cognito Authorizer has verified the request."""
-    event = {"requestContext": {}}
+    event = {"requestContext": {}, "body": json.dumps(body) if body else None}
     if user_id:
         event["requestContext"]["authorizer"] = {"claims": {"sub": user_id}}
     return event
@@ -18,7 +18,7 @@ def test_returns_401_when_no_user_id(mocked_aws):
     assert response["statusCode"] == 401
 
 
-def test_generates_upload_url_and_creates_pending_record(mocked_aws):
+def test_defaults_to_jpeg_when_no_content_type_given(mocked_aws):
     from presign_upload.app import lambda_handler
     from common.dynamo import get_table, receipt_pk
 
@@ -44,6 +44,30 @@ def test_generates_upload_url_and_creates_pending_record(mocked_aws):
     assert len(items) == 1
     assert items[0]["status"] == "PENDING"
     assert items[0]["receiptId"] == body["receiptId"]
+
+
+def test_supports_png_content_type(mocked_aws):
+    from presign_upload.app import lambda_handler
+
+    user_id = "test-user-png"
+    response = lambda_handler(
+        _make_event(user_id, body={"contentType": "image/png"}), context=None
+    )
+
+    assert response["statusCode"] == 200
+    body = json.loads(response["body"])
+    assert body["s3Key"].endswith(".png")
+
+
+def test_rejects_unsupported_content_type(mocked_aws):
+    from presign_upload.app import lambda_handler
+
+    user_id = "test-user-bad-type"
+    response = lambda_handler(
+        _make_event(user_id, body={"contentType": "application/pdf"}), context=None
+    )
+
+    assert response["statusCode"] == 400
 
 
 def test_each_call_generates_a_unique_receipt_id(mocked_aws):
