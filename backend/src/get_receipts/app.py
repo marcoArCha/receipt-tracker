@@ -12,14 +12,15 @@ def lambda_handler(event, context):
         table = get_table()
         result = table.query(
             KeyConditionExpression="PK = :pk AND begins_with(SK, :sk_prefix)",
-            FilterExpression="NOT contains(SK, :item_marker)",
             ExpressionAttributeValues={
                 ":pk": receipt_pk(user_id),
                 ":sk_prefix": "RECEIPT#",
-                ":item_marker": "#ITEM#",
             },
         )
 
+        # DynamoDB can't filter on SK itself (it's a key attribute, not a
+        # regular one) - so we fetch everything matching the prefix
+        # (main records + line items) and split them out here instead.
         receipts = [
             {
                 "receiptId": item.get("receiptId"),
@@ -30,6 +31,7 @@ def lambda_handler(event, context):
                 "createdAt": item.get("createdAt"),
             }
             for item in result.get("Items", [])
+            if "#ITEM#" not in item["SK"]
         ]
 
         # Most recent first

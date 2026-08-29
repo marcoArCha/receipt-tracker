@@ -10,7 +10,7 @@ Globals:
     Environment:
       Variables:
         TABLE_NAME: !Ref ReceiptsTable
-        BUCKET_NAME: !Ref ReceiptsBucket
+        BUCKET_NAME: !Sub receipt-tracker-images-${AWS::AccountId}
 
 Resources:
 
@@ -67,10 +67,158 @@ Resources:
         - ALLOW_REFRESH_TOKEN_AUTH
       GenerateSecret: false
 
-  # ---------- API Gateway (placeholder, filled in Step 5) ----------
-  # ---------- Lambda functions (placeholder, filled in Step 5) ----------
+  # ---------- API Gateway ----------
+
+  ReceiptApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: dev
+      Cors:
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowOrigin: "'*'"
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt UserPool.Arn
+
+  # ---------- Shared Lambda Layer ----------
+
+  CommonLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: receipt-tracker-common
+      ContentUri: src/layers/common/
+      CompatibleRuntimes:
+        - python3.12
+      RetentionPolicy: Delete
+
+  # ---------- Lambda functions ----------
+
+  PresignUploadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/presign_upload/
+      Handler: app.lambda_handler
+      Layers:
+        - !Ref CommonLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReceiptsTable
+        - S3CrudPolicy:
+            BucketName: !Ref ReceiptsBucket
+      Events:
+        PresignUpload:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ReceiptApi
+            Path: /receipts/presign
+            Method: POST
+
+  ProcessReceiptFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/process_receipt/
+      Handler: app.lambda_handler
+      Layers:
+        - !Ref CommonLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReceiptsTable
+        - S3ReadPolicy:
+            BucketName: !Sub receipt-tracker-images-${AWS::AccountId}
+        - Statement:
+            - Effect: Allow
+              Action: textract:AnalyzeExpense
+              Resource: "*"
+      # Note: no route under /receipts here since this function isn't
+      # called by a client - it's invoked automatically by S3 below.
+      Events:
+        ReceiptUploaded:
+          Type: S3
+          Properties:
+            Bucket: !Ref ReceiptsBucket
+            Events: s3:ObjectCreated:*
+
+  GetReceiptsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/get_receipts/
+      Handler: app.lambda_handler
+      Layers:
+        - !Ref CommonLayer
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ReceiptsTable
+      Events:
+        GetReceipts:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ReceiptApi
+            Path: /receipts
+            Method: GET
+
+  GetReceiptFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/get_receipt/
+      Handler: app.lambda_handler
+      Layers:
+        - !Ref CommonLayer
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ReceiptsTable
+      Events:
+        GetReceipt:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ReceiptApi
+            Path: /receipts/{receiptId}
+            Method: GET
+
+  UpdateReceiptFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/update_receipt/
+      Handler: app.lambda_handler
+      Layers:
+        - !Ref CommonLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReceiptsTable
+      Events:
+        UpdateReceipt:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ReceiptApi
+            Path: /receipts/{receiptId}
+            Method: PUT
+
+  DeleteReceiptFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/delete_receipt/
+      Handler: app.lambda_handler
+      Layers:
+        - !Ref CommonLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ReceiptsTable
+        - S3CrudPolicy:
+            BucketName: !Ref ReceiptsBucket
+      Events:
+        DeleteReceipt:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ReceiptApi
+            Path: /receipts/{receiptId}
+            Method: DELETE
 
 Outputs:
+  ApiUrl:
+    Description: Base URL of the API
+    Value: !Sub https://${ReceiptApi}.execute-api.${AWS::Region}.amazonaws.com/dev
   UserPoolId:
     Value: !Ref UserPool
   UserPoolClientId:
