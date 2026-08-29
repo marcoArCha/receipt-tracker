@@ -1,4 +1,15 @@
 import json
+from decimal import Decimal
+
+
+class _DecimalEncoder(json.JSONEncoder):
+    """DynamoDB returns numbers as Decimal, which json.dumps can't handle
+    natively. Convert whole numbers to int and everything else to float."""
+
+    def default(self, obj):
+        if isinstance(obj, Decimal):
+            return int(obj) if obj % 1 == 0 else float(obj)
+        return super().default(obj)
 
 
 def _build(status_code: int, body: dict) -> dict:
@@ -9,7 +20,7 @@ def _build(status_code: int, body: dict) -> dict:
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
         },
-        "body": json.dumps(body),
+        "body": json.dumps(body, cls=_DecimalEncoder),
     }
 
 
